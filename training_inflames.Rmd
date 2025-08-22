@@ -1,0 +1,96 @@
+---
+title: "Training InflaMeS"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+suppressPackageStartupMessages({
+library('tidyverse')
+library('glmnet')
+})
+
+set.seed(1234)
+```
+
+```{r}
+set.seed(1234)
+foldid = sample(rep(seq(5), length = 2009))
+
+for(i in c(0, .1, .5, .7, .9, .95, .99, 1)){
+print('Running Alpha:')
+print(i)
+
+cv.out_r <- cv.glmnet(X_train, Y_train, alpha = i, foldid = foldid,
+                      type.measure = 'mse', family = "gaussian", trace.it = 1)
+
+print(i)
+print(cv.out_r)
+
+
+
+best.lambda_r <- cv.out_r$lambda.min
+mse <- min(cv.out_r$cvm)
+
+
+
+if (i == 0){
+  fits <- tibble(alpha = i, 
+                 lambda = best.lambda_r, 
+                 mse = mse)
+} else {
+  fits <- fits %>% 
+    bind_rows(tibble(alpha = i, 
+                     lambda = best.lambda_r, 
+                     mse = mse))
+}
+gc()
+}
+
+
+fits
+
+
+fits <- fits[order(fits$mse),]
+best.alpha_r <-  fits[1,1]
+best.alpha_r <- best.alpha_r$alpha
+best.alpha_r
+best.lambda_r <-  fits[1,2]
+best.lambda_r <- best.lambda_r$lambda
+best.lambda_r
+```
+
+```{r}
+set.seed(1234)
+
+
+lasso_final <- glmnet(X_train, Y_train, alpha=best.alpha_r, 
+                      lambda=best.lambda_r, family = "gaussian")
+gc()
+coef <- coef(lasso_final)
+coef <- coef[order(coef[,1]),]
+coef <- coef[coef != 0]
+coef <- as.data.frame(coef) %>% 
+  rownames_to_column(var = 'cpg')
+colnames(coef) <- c('cpg', 'pred_inflam')
+coef
+
+
+lasso.pred.prob.train <- predict(lasso_final, newx = X_train, 
+                                 s = best.lambda_r, alpha = best.alpha_r)
+
+lasso.pred.prob <- predict(lasso_final, newx = X_test, s = best.lambda_r, 
+                      alpha = best.alpha_r)
+
+gc()
+
+print('R-squared')
+summary(lm(Y_test ~ lasso.pred.prob))$r.squared
+
+print('Correlation')
+print(cor(Y_test, lasso.pred.prob))
+```
